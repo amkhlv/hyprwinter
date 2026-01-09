@@ -2,12 +2,13 @@
 extern crate serde_derive;
 extern crate serde;
 extern crate serde_xml_rs;
-
 use dirs::home_dir;
 use gtk::prelude::*;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -80,7 +81,34 @@ pub fn get_wm_data() -> (
     u32,
     Window,
 ) {
-    return (Rc::new(Vec::new()), Rc::new("TODO".to_string()), 0, 0);
+    // Run the "hyprctl -j clients" command
+    let output = Command::new("hyprctl")
+        .arg("-j")
+        .arg("clients")
+        .output()
+        .expect("Failed to run hyprctl command");
+
+    // Convert output to string
+    let json_str = String::from_utf8(output.stdout).expect("Failed to parse output as UTF-8");
+
+    // Parse the JSON
+    let clients: Value = serde_json::from_str(&json_str).expect("Failed to parse JSON output");
+
+    // Extract wins (address, workspace.id, title, class)
+    let wins = clients
+        .as_array()
+        .expect("Expected JSON array")
+        .iter()
+        .filter_map(|client| {
+            let address = client["address"].as_str()?.to_string();
+            let workspace_id = client["workspace"]["id"].as_u64()? as u32;
+            let title = client["title"].as_str()?.to_string();
+            let class = client["class"].as_str()?.to_string();
+            Some((address, workspace_id, title, class))
+        })
+        .collect::<Vec<_>>();
+
+    (Rc::new(wins), Rc::new("TODO".to_string()), 0, 0)
 }
 
 pub fn abbreviate(x: String, maxlen: usize) -> String {
