@@ -1,0 +1,55 @@
+[package]
+name = "hlwinter"
+description = "Keyboard navigation and window tiling on Hyprland"
+readme = "README.md"
+license = "GPL-3.0"
+version = "2.1.0"
+authors = ["Andrei Mikhailov <amkhlv@gmail.com>"]
+repository = "https://github.com/amkhlv/hlwinter"
+edition = "2021"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+
+[[bin]]
+name = "wint"
+path = "src/wint.rs"
+
+[[bin]]
+name = "winj"
+path = "src/winj.rs"
+
+[dependencies.gtk]
+version = "0.18.2"
+
+[dependencies.glib]
+version = "0.18.5"
+
+[dependencies.gdk]
+version = "0.18.2"
+
+[dependencies.gdk-sys]
+version = "0.18.2"
+
+[dependencies.gio]
+version = "0.18.4"
+
+[dependencies.dirs]
+version = "6.0.0"
+
+[dependencies.serde]
+version = "1.0.219"
+
+[dependencies.serde_derive]
+version = "1.0.219"
+
+[dependencies.serde-xml-rs]
+version = "0.8.1"
+
+[dependencies.clap]
+version = "2.33.3"
+
+[dependencies.hex]
+version = "0.4.3"

@@ -1,0 +1,14 @@
+<configuration>
+  <tmpfile><in_xdg_runtime/></tmpfile>
+  <spaceBetweenButtons>5</spaceBetweenButtons>
+  <maxwidth>60</maxwidth>
+  <blacklist>
+    <item><class>xfce4-panel</class></item>
+    <item><class>Xfce4-panel</class></item>
+    <item><class>xfdesktop</class></item>
+    <item><class>Xfdesktop</class></item>
+    <item><class>gnome-panel</class></item>
+    <item><class>kdesktop</class></item>
+    <item><class>xfce4-notifyd</class></item>
+  </blacklist>
+</configuration>
