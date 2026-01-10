@@ -116,22 +116,48 @@ pub fn get_wm_data() -> (
     let output = Command::new("hyprctl")
         .arg("-j")
         .arg("activeworkspace")
-        .output()
-        .expect("Failed to run hyprctl command");
-    let json_str = String::from_utf8(output.stdout).expect("Failed to parse output as UTF-8");
-    let workspace: Value = serde_json::from_str(&json_str).expect("Failed to parse JSON output");
-    let cur_desktop = workspace["id"]
-        .as_u64()
-        .expect("Failed to parse workspace ID") as u32;
+        .output();
+
+    let cur_desktop = if let Ok(output) = output {
+        if let Ok(json_str) = String::from_utf8(output.stdout) {
+            if let Ok(workspace) = serde_json::from_str::<Value>(&json_str) {
+                if let Some(id) = workspace["id"].as_u64() {
+                    id as u32
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     let output = Command::new("hyprctl")
         .arg("-j")
         .arg("activewindow")
-        .output()
-        .expect("Failed to run hyprctl command");
-    let json_str = String::from_utf8(output.stdout).expect("Failed to parse output as UTF-8");
-    let window: Value = serde_json::from_str(&json_str).expect("Failed to parse JSON output");
-    let cur_window = parse_hex_to_u64(window["address"].as_str().unwrap()).unwrap();
+        .output();
+
+    let cur_window = if let Ok(output) = output {
+        if let Ok(json_str) = String::from_utf8(output.stdout) {
+            if let Ok(window) = serde_json::from_str::<Value>(&json_str) {
+                if let Some(address) = window["address"].as_str() {
+                    parse_hex_to_u64(address).unwrap_or(0)
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     (
         Rc::new(wins),
