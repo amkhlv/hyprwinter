@@ -74,7 +74,12 @@ pub struct WM {
 }
 
 pub type Window = u64;
-
+fn parse_hex_to_u64(hex_str: &str) -> Result<u64, std::num::ParseIntError> {
+    // Ensure the string starts with "0x" and strip it
+    let trimmed = hex_str.trim_start_matches("0x");
+    // Parse the remaining part as a hexadecimal number
+    u64::from_str_radix(trimmed, 16)
+}
 pub fn get_wm_data() -> (
     Rc<Vec<(Window, u32, String, String)>>,
     Rc<String>,
@@ -100,13 +105,15 @@ pub fn get_wm_data() -> (
         .expect("Expected JSON array")
         .iter()
         .filter_map(|client| {
-            let address = client["address"].as_u64()?;
+            println!("Client: {:?}", client);
+            let address = parse_hex_to_u64(client["address"].as_str()?).unwrap();
             let workspace_id = client["workspace"]["id"].as_u64()? as u32;
             let title = client["title"].as_str()?.to_string();
             let class = client["class"].as_str()?.to_string();
             Some((address, workspace_id, title, class))
         })
         .collect::<Vec<_>>();
+    println!("Wins: {:?}", wins);
 
     (Rc::new(wins), Rc::new("TODO".to_string()), 0, 0)
 }
@@ -237,5 +244,24 @@ pub fn check_tilings(p: &Path) -> () {
 }
 
 pub fn go_to_window(win: Window) {
-    println!("-- going to window {:?}\n   ...", win);
+    println!("-- going to window {:x}\n   ...", win);
+    let jumper = Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("focuswindow")
+        .arg(format!("address:0x{:x}", win))
+        .output()
+        .expect("Failed to run hyprctl command");
+
+    if jumper.status.success() {
+        println!(
+            "Command succeeded: {}",
+            String::from_utf8_lossy(&jumper.stdout)
+        );
+    } else {
+        eprintln!(
+            "Command failed with status {}: {}",
+            jumper.status,
+            String::from_utf8_lossy(&jumper.stderr)
+        );
+    }
 }
