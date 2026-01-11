@@ -116,10 +116,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let keyval = e.keyval();
             let _keystate = e.state();
             if *keyval == gdk_sys::GDK_KEY_Escape as u32 {
-                match pw.as_ref() {
-                    Some(x) => { tmpfile.borrow_mut().write(&format!("{}",x).into_bytes()[..]).expect("failed writing to tmpfile")  ; () }
-                    None => ()
-                }
                 app.quit();
                 return Propagation::Stop;
             }
@@ -144,6 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(aa) => {
                     app.quit();
                     if aa < 97 && aa > 48 {
+                        tmpfile.borrow_mut().write(&format!("{:#x}",active).into_bytes()[..]).expect("failed writing to tmpfile");
                         let new_desktop = (aa - 48) as u32;
                         let _ = Command::new("hyprctl")
                             .arg("dispatch")
