@@ -11,7 +11,10 @@ use glib::signal::Propagation;
 use gtk::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::rc::Rc;
+use std::thread;
+use std::time::Duration;
 
 use hlwinter::{
     check_css, check_tilings, get_conf, get_config_dir, get_wm_data, make_vbox, Config, Window,
@@ -64,6 +67,43 @@ fn get_geometry(xml_path: &PathBuf, nick: String, geom: &String) -> Option<Vec<u
                 .map(|s| str::parse::<u32>(s).unwrap())
                 .collect()
         })
+}
+fn do_resize(wid: Window, g: &Vec<u32>) {
+    println!("Resizing window address:0x{:x}", wid);
+    let _ = Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("focuswindow")
+        .arg(format!("address:0x{:x}", wid))
+        .status()
+        .expect("Failed to focus window");
+
+    thread::sleep(Duration::from_millis(200));
+
+    let _ = Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("movewindowpixel")
+        .arg("exact")
+        .arg(format!("{}", g[0]))
+        .arg(format!("{},address:0x{:x}", g[1], wid))
+        .status()
+        .expect("Failed to move window");
+
+    let _ = Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("focuswindow")
+        .arg(format!("address:0x{:x}", wid))
+        .status()
+        .expect("Failed to focus window");
+
+    thread::sleep(Duration::from_millis(200));
+
+    let _ = Command::new("hyprctl")
+        .arg("dispatch")
+        .arg("resizewindowpixel")
+        .arg("exact")
+        .arg(format!("{}", g[2]))
+        .arg(format!("{},address:0x{:x}", g[3], wid))
+        .spawn();
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -144,7 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             app.quit();
             for (wid, mg) in tilings.iter() {
                 match mg {
-                    Some(g) => (),
+                    Some(g) => do_resize(*wid, &g),
                     None => ()
                 }
             }

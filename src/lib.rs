@@ -86,6 +86,28 @@ pub fn get_wm_data() -> (
     u32,
     Window,
 ) {
+    // Run the "hyprctl -j monitors" command
+    let output = Command::new("hyprctl")
+        .arg("-j")
+        .arg("monitors")
+        .output()
+        .expect("Failed to run hyprctl command");
+
+    // Convert output to string
+    let json_str = String::from_utf8(output.stdout).expect("Failed to parse output as UTF-8");
+
+    // Parse the JSON
+    let monitors: Value = serde_json::from_str(&json_str).expect("Failed to parse JSON output");
+    let geom = match monitors {
+        Value::Array(ref arr) => {
+            let monitor = arr.get(0).expect("Expected at least one monitor");
+            let width = monitor["width"].as_u64().unwrap() as u32;
+            let height = monitor["height"].as_u64().unwrap() as u32;
+            (width, height)
+        }
+        _ => panic!("Unexpected JSON format"),
+    };
+
     // Run the "hyprctl -j clients" command
     let output = Command::new("hyprctl")
         .arg("-j")
@@ -161,7 +183,7 @@ pub fn get_wm_data() -> (
 
     (
         Rc::new(wins),
-        Rc::new("TODO".to_string()),
+        Rc::new(format!("{}x{}", geom.0, geom.1)),
         cur_desktop,
         cur_window,
     )
