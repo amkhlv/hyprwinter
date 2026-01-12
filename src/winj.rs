@@ -129,6 +129,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .arg("focuswindow")
                             .arg(format!("address:{}", w))
                             .spawn();
+                        let _ = Command::new("hyprctl")
+                            .arg("dispatch")
+                            .arg("alterzorder")
+                            .arg(format!("top,address:{}", w))
+                            .status()
+                            .expect("Failed to raise window");
                         tmpfile.borrow_mut().write(&format!("{:#x}",active).into_bytes()[..]).expect("failed writing to tmpfile");
                     }
                     None => ()
