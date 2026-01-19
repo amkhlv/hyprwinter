@@ -25,7 +25,7 @@ Installation
 With Nix package manager
 ------------------------
 
-    nix profile install github:amkhlv/hlwinter
+    nix profile install github:amkhlv/hyprwinter
 
 
 This installs two programs: `winj` and `wint`.
@@ -40,8 +40,8 @@ and some system libraries:
 
 then build and install:
 
-    git clone https://github.com/amkhlv/hlwinter
-    cd hlwinter
+    git clone https://github.com/amkhlv/hyprwinter
+    cd hyprwinter
     cargo install --path .
 
 This installs two programs: 

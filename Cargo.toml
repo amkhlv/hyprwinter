@@ -1,11 +1,11 @@
 [package]
-name = "hlwinter"
+name = "hyprwinter"
 description = "Keyboard navigation and window tiling on Hyprland"
 readme = "README.md"
 license = "GPL-3.0"
 version = "2.1.0"
 authors = ["Andrei Mikhailov <amkhlv@gmail.com>"]
-repository = "https://github.com/amkhlv/hlwinter"
+repository = "https://github.com/amkhlv/hyprwinter"
 edition = "2021"
 
 
