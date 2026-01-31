@@ -55,6 +55,12 @@ They are installed into `~/.cargo/bin/` (which was added to `PATH` when `cargo` 
 Use
 ===
 
+The configuration directory is:
+
+    ~/.config/winterreise
+
+The sample configuration files are in `./config`. They should be copied to `~/.config/winterreise`.
+
 Window tiling
 -------------
 
