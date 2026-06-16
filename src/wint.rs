@@ -87,6 +87,19 @@ fn hypr_dispatch(dispatcher: &str, argument: String) {
     }
 }
 
+fn hypr_batch(commands: Vec<String>) {
+    let batch = commands.join(" ; ");
+    let status = Command::new("hyprctl")
+        .arg("--batch")
+        .arg(&batch)
+        .status()
+        .expect("Failed to run hyprctl batch");
+
+    if !status.success() {
+        eprintln!("hyprctl --batch {} failed with status {}", batch, status);
+    }
+}
+
 fn do_resize(wid: Window, g: &Vec<u32>, geom: &Monitor) {
     let address = format!("address:0x{:x}", wid);
     let x = (g[0] as f32 / geom.scale).round();
@@ -99,15 +112,14 @@ fn do_resize(wid: Window, g: &Vec<u32>, geom: &Monitor) {
 
     thread::sleep(Duration::from_millis(100));
 
-    hypr_dispatch(
-        "resizewindowpixel",
-        format!("exact {} {},{}", width, height, address),
-    );
-    hypr_dispatch(
-        "movewindowpixel",
-        format!("exact {} {},{}", x, y, address),
-    );
-    hypr_dispatch("alterzorder", format!("top,{}", address));
+    hypr_batch(vec![
+        format!(
+            "dispatch resizewindowpixel exact {} {},{}",
+            width, height, address
+        ),
+        format!("dispatch movewindowpixel exact {} {},{}", x, y, address),
+        format!("dispatch alterzorder top,{}", address),
+    ]);
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
