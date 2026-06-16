@@ -70,60 +70,44 @@ fn get_geometry(xml_path: &PathBuf, nick: String, geom: &String) -> Option<Vec<u
                 })
         })
 }
+
+fn hypr_dispatch(dispatcher: &str, argument: String) {
+    let status = Command::new("hyprctl")
+        .arg("dispatch")
+        .arg(dispatcher)
+        .arg(&argument)
+        .status()
+        .unwrap_or_else(|_| panic!("Failed to run hyprctl dispatch {}", dispatcher));
+
+    if !status.success() {
+        eprintln!(
+            "hyprctl dispatch {} {} failed with status {}",
+            dispatcher, argument, status
+        );
+    }
+}
+
 fn do_resize(wid: Window, g: &Vec<u32>, geom: &Monitor) {
-    //println!("Resizing window address:0x{:x}", wid);
-    let _ = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg("focuswindow")
-        .arg(format!("address:0x{:x}", wid))
-        .status()
-        .expect("Failed to focus window");
+    let address = format!("address:0x{:x}", wid);
+    let x = (g[0] as f32 / geom.scale).round();
+    let y = (g[1] as f32 / geom.scale).round();
+    let width = (g[2] as f32 / geom.scale).round();
+    let height = (g[3] as f32 / geom.scale).round();
+
+    hypr_dispatch("focuswindow", address.clone());
+    hypr_dispatch("setfloating", address.clone());
 
     thread::sleep(Duration::from_millis(100));
 
-    let _ = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg("movewindowpixel")
-        .arg("exact")
-        .arg(format!("{}", (g[0] as f32 / geom.scale).round()))
-        .arg(format!(
-            "{},address:0x{:x}",
-            (g[1] as f32 / geom.scale).round(),
-            wid
-        ))
-        .status()
-        .expect("Failed to move window");
-
-    let _ = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg("focuswindow")
-        .arg(format!("address:0x{:x}", wid))
-        .status()
-        .expect("Failed to focus window");
-
-    thread::sleep(Duration::from_millis(100));
-
-    let _ = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg("resizewindowpixel")
-        .arg("exact")
-        .arg(format!("{}", (g[2] as f32 / geom.scale).round()))
-        .arg(format!(
-            "{},address:0x{:x}",
-            (g[3] as f32 / geom.scale).round(),
-            wid
-        ))
-        .status()
-        .expect("Failed to resize window");
-
-    thread::sleep(Duration::from_millis(100));
-
-    let _ = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg("alterzorder")
-        .arg(format!("top,address:0x{:x}", wid))
-        .status()
-        .expect("Failed to raise window");
+    hypr_dispatch(
+        "resizewindowpixel",
+        format!("exact {} {},{}", width, height, address),
+    );
+    hypr_dispatch(
+        "movewindowpixel",
+        format!("exact {} {},{}", x, y, address),
+    );
+    hypr_dispatch("alterzorder", format!("top,{}", address));
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
