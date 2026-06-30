@@ -9,12 +9,11 @@ use glib::clone;
 use glib::signal::Propagation;
 use gtk::glib;
 use gtk::prelude::*;
-use std::process::Command;
 
 use crate::gdk::prelude::{ApplicationExt, ApplicationExtManual};
 use hyprwinter::{
-    check_css, check_tilings, get_conf, get_config_dir, get_wm_data, go_to_window, make_vbox,
-    Config, TMPFile,
+    check_css, check_tilings, get_conf, get_config_dir, get_wm_data, go_to_window, hypr_dispatch,
+    make_vbox, Config, TMPFile, Workspace,
 };
 use std::cell::RefCell;
 use std::io::{BufRead, Write};
@@ -120,43 +119,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Propagation::Stop;
             }
             if *keyval == gdk_sys::GDK_KEY_space as u32 {
-                app.quit();
                 match pw.as_ref() {
                     Some(w) =>  {
                         println!("-- previous window was {}",w);
-                        let _ = Command::new("hyprctl")
-                            .arg("dispatch")
-                            .arg("focuswindow")
-                            .arg(format!("address:{}", w))
-                            .spawn();
-                        let _ = Command::new("hyprctl")
-                            .arg("dispatch")
-                            .arg("alterzorder")
-                            .arg(format!("top,address:{}", w))
-                            .status()
-                            .expect("Failed to raise window");
+                        let address = format!("address:{}", w);
+                        hypr_dispatch("focuswindow", &address);
+                        hypr_dispatch("alterzorder", format!("top,{}", address));
                         tmpfile.borrow_mut().write(&format!("{:#x}",active).into_bytes()[..]).expect("failed writing to tmpfile");
                     }
                     None => ()
                 }
+                app.quit();
                 return Propagation::Stop;
             }
             let a = (format!("{}",*keyval)).parse::<u8>();
             match a {
                 Ok(aa) => {
-                    app.quit();
                     if aa < 97 && aa > 48 {
                         tmpfile.borrow_mut().write(&format!("{:#x}",active).into_bytes()[..]).expect("failed writing to tmpfile");
-                        let new_desktop = (aa - 48) as u32;
-                        let _ = Command::new("hyprctl")
-                            .arg("dispatch")
-                            .arg("workspace")
-                            .arg(format!("{new_desktop}"))
-                            .spawn();
+                        let new_desktop = (aa - 48) as Workspace;
+                        hypr_dispatch("workspace", format!("{new_desktop}"));
+                        app.quit();
                         return Propagation::Stop;
-                    } else  if let Some(s) = &hints.get(&(aa - 97)) {
+                    } else if let Some(hint) =
+                        aa.checked_sub(97).and_then(|hint| hints.get(&hint))
+                    {
                         tmpfile.borrow_mut().write(&format!("{:#x}",active).into_bytes()[..]).expect("failed writing to tmpfile");
-                        go_to_window(**s);
+                        go_to_window(*hint);
+                        app.quit();
                         return Propagation::Stop;
                     } else {
                         return Propagation::Proceed;

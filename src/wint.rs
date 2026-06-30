@@ -11,14 +11,13 @@ use glib::signal::Propagation;
 use gtk::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
 use hyprwinter::{
-    check_css, check_tilings, get_conf, get_config_dir, get_wm_data, make_vbox, Config, Monitor,
-    Window,
+    check_css, check_tilings, get_conf, get_config_dir, get_wm_data, hypr_dispatch, make_vbox,
+    Config, Monitor, Window,
 };
 
 #[macro_use]
@@ -71,35 +70,6 @@ fn get_geometry(xml_path: &PathBuf, nick: String, geom: &String) -> Option<Vec<u
         })
 }
 
-fn hypr_dispatch(dispatcher: &str, argument: String) {
-    let status = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg(dispatcher)
-        .arg(&argument)
-        .status()
-        .unwrap_or_else(|_| panic!("Failed to run hyprctl dispatch {}", dispatcher));
-
-    if !status.success() {
-        eprintln!(
-            "hyprctl dispatch {} {} failed with status {}",
-            dispatcher, argument, status
-        );
-    }
-}
-
-fn hypr_batch(commands: Vec<String>) {
-    let batch = commands.join(" ; ");
-    let status = Command::new("hyprctl")
-        .arg("--batch")
-        .arg(&batch)
-        .status()
-        .expect("Failed to run hyprctl batch");
-
-    if !status.success() {
-        eprintln!("hyprctl --batch {} failed with status {}", batch, status);
-    }
-}
-
 fn do_resize(wid: Window, g: &Vec<u32>, geom: &Monitor) {
     let address = format!("address:0x{:x}", wid);
     let x = (g[0] as f32 / geom.scale).round();
@@ -107,19 +77,20 @@ fn do_resize(wid: Window, g: &Vec<u32>, geom: &Monitor) {
     let width = (g[2] as f32 / geom.scale).round();
     let height = (g[3] as f32 / geom.scale).round();
 
-    hypr_dispatch("focuswindow", address.clone());
-    hypr_dispatch("setfloating", address.clone());
+    hypr_dispatch("focuswindow", &address);
+    hypr_dispatch("setfloating", &address);
 
     thread::sleep(Duration::from_millis(100));
 
-    hypr_batch(vec![
-        format!(
-            "dispatch resizewindowpixel exact {} {},{}",
-            width, height, address
-        ),
-        format!("dispatch movewindowpixel exact {} {},{}", x, y, address),
-        format!("dispatch alterzorder top,{}", address),
-    ]);
+    hypr_dispatch(
+        "resizewindowpixel",
+        format!("exact {} {},{}", width, height, address),
+    );
+    hypr_dispatch(
+        "movewindowpixel",
+        format!("exact {} {},{}", x, y, address),
+    );
+    hypr_dispatch("alterzorder", format!("top,{}", address));
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -188,14 +159,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let xml_path = Rc::clone(&xml_path);
         entry.connect_activate(clone!(@weak entry, @weak app => move |_| {
             let command : String = entry.text().to_string();
-            let tilings : Vec<(Window, Option<Vec<u32>>)> = command.split(" ").map(|com| {
-                let mut it = com.chars();
-                let charhint = it.next().unwrap();
-                let wid = *charhints.get(&(charhint as u8 - 97 as u8)).unwrap();
-                let tiling = it.collect::<String>();
-                let mg = get_geometry(&xml_path, tiling, &format!("{}x{}", geom1.width, geom1.height));
-                return (wid, mg)
-            }).collect();
+            let tilings : Vec<(Window, Option<Vec<u32>>)> = command
+                .split_whitespace()
+                .filter_map(|com| {
+                    let mut it = com.chars();
+                    let charhint = it.next()?;
+                    let hint = (charhint as u8).checked_sub(97)?;
+                    let wid = *charhints.get(&hint)?;
+                    let tiling = it.collect::<String>();
+                    let mg = get_geometry(
+                        &xml_path,
+                        tiling,
+                        &format!("{}x{}", geom1.width, geom1.height),
+                    );
+                    Some((wid, mg))
+                })
+                .collect();
             app.quit();
             for (wid, mg) in tilings.iter() {
                 match mg {

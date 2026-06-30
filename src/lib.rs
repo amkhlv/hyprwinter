@@ -78,123 +78,242 @@ pub struct Config {
 }
 
 pub struct WM {
-    pub wins: Rc<Vec<(u32, u32, String, String)>>,
-    pub desktop: u32,
+    pub wins: Rc<Vec<(Window, Workspace, String, String)>>,
+    pub desktop: Workspace,
 }
 
 pub type Window = u64;
+pub type Workspace = i64;
+
 fn parse_hex_to_u64(hex_str: &str) -> Result<u64, std::num::ParseIntError> {
-    // Ensure the string starts with "0x" and strip it
-    let trimmed = hex_str.trim_start_matches("0x");
+    let trimmed = hex_str
+        .trim()
+        .trim_start_matches("address:")
+        .trim_start_matches("0x");
     // Parse the remaining part as a hexadecimal number
     u64::from_str_radix(trimmed, 16)
 }
+
+fn run_hyprctl_json(args: &[&str]) -> Option<Value> {
+    let output = Command::new("hyprctl").args(args).output().ok()?;
+    if !output.status.success() {
+        eprintln!(
+            "hyprctl {} failed with status {}: {}",
+            args.join(" "),
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    serde_json::from_str(&stdout)
+        .map_err(|err| {
+            eprintln!("hyprctl {} returned invalid JSON: {}", args.join(" "), err);
+            err
+        })
+        .ok()
+}
+
+fn json_to_workspace_id(value: &Value) -> Option<Workspace> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|id| Workspace::try_from(id).ok()))
+}
+
+fn json_to_window_address(value: &Value) -> Option<Window> {
+    if let Some(address) = value.as_str() {
+        parse_hex_to_u64(address).ok()
+    } else {
+        value.as_u64()
+    }
+}
+
+fn lua_string(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    )
+}
+
+fn lua_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.parse::<i64>().is_ok() {
+        trimmed.to_string()
+    } else {
+        lua_string(trimmed)
+    }
+}
+
+fn lua_dispatcher_expr(dispatcher: &str, argument: &str) -> Option<String> {
+    let argument = argument.trim();
+    match dispatcher {
+        "workspace" => Some(format!(
+            "hl.dsp.focus({{ workspace = {} }})",
+            lua_value(argument)
+        )),
+        "focuswindow" => Some(format!(
+            "hl.dsp.focus({{ window = {} }})",
+            lua_string(argument)
+        )),
+        "setfloating" => Some("hl.dsp.window.float({ action = \"set\" })".to_string()),
+        "alterzorder" => {
+            let mut args = argument.splitn(2, ',');
+            let mode = args.next()?.trim();
+            let window = args.next().map(str::trim).filter(|s| !s.is_empty());
+
+            Some(match window {
+                Some(window) => format!(
+                    "hl.dsp.window.alter_zorder({{ mode = {}, window = {} }})",
+                    lua_string(mode),
+                    lua_string(window)
+                ),
+                None => format!(
+                    "hl.dsp.window.alter_zorder({{ mode = {} }})",
+                    lua_string(mode)
+                ),
+            })
+        }
+        "resizewindowpixel" | "movewindowpixel" => {
+            let call = if dispatcher == "resizewindowpixel" {
+                "hl.dsp.window.resize"
+            } else {
+                "hl.dsp.window.move"
+            };
+            let mut args = argument.splitn(2, ',');
+            let geometry = args.next()?.trim();
+            let window = args.next().map(str::trim).filter(|s| !s.is_empty());
+            let geometry = geometry.strip_prefix("exact ").unwrap_or(geometry);
+            let mut parts = geometry.split_whitespace();
+            let x = parts.next()?;
+            let y = parts.next()?;
+            if parts.next().is_some() {
+                return None;
+            }
+
+            Some(match window {
+                Some(window) => format!(
+                    "{}({{ x = {}, y = {}, window = {} }})",
+                    call,
+                    x,
+                    y,
+                    lua_string(window)
+                ),
+                None => format!("{}({{ x = {}, y = {} }})", call, x, y),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn run_hypr_dispatch(args: &[&str]) -> Result<(), String> {
+    let output = Command::new("hyprctl")
+        .arg("dispatch")
+        .args(args)
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "status {}: {}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
+}
+
+pub fn hypr_dispatch(dispatcher: &str, argument: impl AsRef<str>) -> bool {
+    let argument = argument.as_ref();
+
+    if let Some(lua_expr) = lua_dispatcher_expr(dispatcher, argument) {
+        match run_hypr_dispatch(&[&lua_expr]) {
+            Ok(()) => return true,
+            Err(lua_error) => match run_hypr_dispatch(&[dispatcher, argument]) {
+                Ok(()) => return true,
+                Err(legacy_error) => {
+                    eprintln!(
+                        "hyprctl dispatch failed\n  lua: hyprctl dispatch {} -> {}\n  legacy: hyprctl dispatch {} {} -> {}",
+                        lua_expr, lua_error, dispatcher, argument, legacy_error
+                    );
+                    return false;
+                }
+            },
+        }
+    }
+
+    match run_hypr_dispatch(&[dispatcher, argument]) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!(
+                "hyprctl dispatch {} {} failed: {}",
+                dispatcher, argument, err
+            );
+            false
+        }
+    }
+}
+
+pub fn hypr_lua_dispatch(lua_expr: &str) -> bool {
+    match run_hypr_dispatch(&[lua_expr]) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("hyprctl dispatch {} failed: {}", lua_expr, err);
+            false
+        }
+    }
+}
+
 pub fn get_wm_data() -> (
-    Rc<Vec<(Window, u32, String, String)>>,
+    Rc<Vec<(Window, Workspace, String, String)>>,
     Rc<Monitor>,
-    u32,
+    Workspace,
     Window,
 ) {
-    // Run the "hyprctl -j monitors" command
-    let output = Command::new("hyprctl")
-        .arg("-j")
-        .arg("monitors")
-        .output()
-        .expect("Failed to run hyprctl command");
+    let monitors = run_hyprctl_json(&["-j", "monitors"]);
+    let geom = monitors
+        .as_ref()
+        .and_then(Value::as_array)
+        .and_then(|arr| {
+            arr.iter()
+                .find(|monitor| monitor["focused"].as_bool().unwrap_or(false))
+                .or_else(|| arr.first())
+        })
+        .map(|monitor| Monitor {
+            width: monitor["width"].as_u64().unwrap_or_default() as u32,
+            height: monitor["height"].as_u64().unwrap_or_default() as u32,
+            scale: monitor["scale"].as_f64().unwrap_or(1.0) as f32,
+        })
+        .unwrap_or(Monitor {
+            width: 0,
+            height: 0,
+            scale: 1.0,
+        });
 
-    // Convert output to string
-    let json_str = String::from_utf8(output.stdout).expect("Failed to parse output as UTF-8");
-
-    // Parse the JSON
-    let monitors: Value = serde_json::from_str(&json_str).expect("Failed to parse JSON output");
-    let geom = match monitors {
-        Value::Array(ref arr) => {
-            let monitor = arr.get(0).expect("Expected at least one monitor");
-            let width = monitor["width"].as_u64().unwrap() as u32;
-            let height = monitor["height"].as_u64().unwrap() as u32;
-            let scale = monitor["scale"].as_f64().unwrap() as f32;
-            let monitor = Monitor {
-                width,
-                height,
-                scale,
-            };
-            monitor
-        }
-        _ => panic!("Unexpected JSON format"),
-    };
-
-    // Run the "hyprctl -j clients" command
-    let output = Command::new("hyprctl")
-        .arg("-j")
-        .arg("clients")
-        .output()
-        .expect("Failed to run hyprctl command");
-
-    // Convert output to string
-    let json_str = String::from_utf8(output.stdout).expect("Failed to parse output as UTF-8");
-
-    // Parse the JSON
-    let clients: Value = serde_json::from_str(&json_str).expect("Failed to parse JSON output");
+    let clients = run_hyprctl_json(&["-j", "clients"]).unwrap_or(Value::Array(vec![]));
     // Extract wins (address, workspace.id, title, class)
     let wins = clients
         .as_array()
-        .expect("Expected JSON array")
-        .iter()
+        .into_iter()
+        .flatten()
         .filter_map(|client| {
-            println!("Client: {:?}", client);
-            let address = parse_hex_to_u64(client["address"].as_str()?).unwrap();
-            let workspace_id = client["workspace"]["id"].as_u64()? as u32;
-            let title = client["title"].as_str()?.to_string();
-            let class = client["class"].as_str()?.to_string();
+            let address = json_to_window_address(&client["address"])?;
+            let workspace_id = json_to_workspace_id(&client["workspace"]["id"])?;
+            let title = client["title"].as_str().unwrap_or_default().to_string();
+            let class = client["class"].as_str().unwrap_or_default().to_string();
             Some((address, workspace_id, title, class))
         })
         .collect::<Vec<_>>();
 
-    let output = Command::new("hyprctl")
-        .arg("-j")
-        .arg("activeworkspace")
-        .output();
+    let cur_desktop = run_hyprctl_json(&["-j", "activeworkspace"])
+        .and_then(|workspace| json_to_workspace_id(&workspace["id"]))
+        .unwrap_or_default();
 
-    let cur_desktop = if let Ok(output) = output {
-        if let Ok(json_str) = String::from_utf8(output.stdout) {
-            if let Ok(workspace) = serde_json::from_str::<Value>(&json_str) {
-                if let Some(id) = workspace["id"].as_u64() {
-                    id as u32
-                } else {
-                    0
-                }
-            } else {
-                0
-            }
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    let output = Command::new("hyprctl")
-        .arg("-j")
-        .arg("activewindow")
-        .output();
-
-    let cur_window = if let Ok(output) = output {
-        if let Ok(json_str) = String::from_utf8(output.stdout) {
-            if let Ok(window) = serde_json::from_str::<Value>(&json_str) {
-                if let Some(address) = window["address"].as_str() {
-                    parse_hex_to_u64(address).unwrap_or(0)
-                } else {
-                    0
-                }
-            } else {
-                0
-            }
-        } else {
-            0
-        }
-    } else {
-        0
-    };
+    let cur_window = run_hyprctl_json(&["-j", "activewindow"])
+        .and_then(|window| json_to_window_address(&window["address"]))
+        .unwrap_or_default();
 
     (Rc::new(wins), Rc::new(geom), cur_desktop, cur_window)
 }
@@ -219,8 +338,8 @@ pub fn abbreviate(x: String, maxlen: usize) -> String {
     }
 }
 pub fn make_vbox(
-    wins: &Rc<Vec<(Window, u32, String, String)>>,
-    desktop: Option<u32>,
+    wins: &Rc<Vec<(Window, Workspace, String, String)>>,
+    desktop: Option<Workspace>,
     space_between_buttons: i32,
     maxlen: usize,
     blacklist: &Rc<BlacklistedItems>,
@@ -326,32 +445,8 @@ pub fn check_tilings(p: &Path) -> () {
 
 pub fn go_to_window(win: Window) {
     println!("-- going to window {:x}\n   ...", win);
-    let jumper = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg("focuswindow")
-        .arg(format!("address:0x{:x}", win))
-        .output()
-        .expect("Failed to run hyprctl command");
-
-    if jumper.status.success() {
-        println!(
-            "Command succeeded: {}",
-            String::from_utf8_lossy(&jumper.stdout)
-        );
-    } else {
-        eprintln!(
-            "Command failed with status {}: {}",
-            jumper.status,
-            String::from_utf8_lossy(&jumper.stderr)
-        );
-    }
-
+    let address = format!("address:0x{:x}", win);
+    hypr_dispatch("focuswindow", &address);
     thread::sleep(Duration::from_millis(100));
-
-    let _ = Command::new("hyprctl")
-        .arg("dispatch")
-        .arg("alterzorder")
-        .arg(format!("top,address:0x{:x}", win))
-        .status()
-        .expect("Failed to raise window");
+    hypr_dispatch("alterzorder", format!("top,{}", address));
 }
