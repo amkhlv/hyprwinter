@@ -16,8 +16,8 @@ use std::thread;
 use std::time::Duration;
 
 use hyprwinter::{
-    check_css, check_tilings, get_conf, get_config_dir, get_wm_data, hypr_dispatch, make_vbox,
-    Config, Monitor, Window,
+    check_css, check_tilings, get_conf, get_config_dir, get_wm_data, hypr_tile_window, make_vbox,
+    window_geometry, window_is_floating, Config, Monitor, Window,
 };
 
 #[macro_use]
@@ -71,26 +71,42 @@ fn get_geometry(xml_path: &PathBuf, nick: String, geom: &String) -> Option<Vec<u
 }
 
 fn do_resize(wid: Window, g: &Vec<u32>, geom: &Monitor) {
-    let address = format!("address:0x{:x}", wid);
-    let x = (g[0] as f32 / geom.scale).round();
-    let y = (g[1] as f32 / geom.scale).round();
-    let width = (g[2] as f32 / geom.scale).round();
-    let height = (g[3] as f32 / geom.scale).round();
+    let x = (g[0] as f32 / geom.scale).round() as i32;
+    let y = (g[1] as f32 / geom.scale).round() as i32;
+    let width = (g[2] as f32 / geom.scale).round() as i32;
+    let height = (g[3] as f32 / geom.scale).round() as i32;
 
-    hypr_dispatch("focuswindow", &address);
-    hypr_dispatch("setfloating", &address);
+    for attempt in 0..2 {
+        hypr_tile_window(wid, x, y, width, height);
 
-    thread::sleep(Duration::from_millis(100));
+        for _ in 0..10 {
+            let tiled = window_is_floating(wid).unwrap_or(false)
+                && window_geometry(wid)
+                    .map(|actual| geometry_matches(actual, (x, y, width, height)))
+                    .unwrap_or(false);
+            if tiled {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
 
-    hypr_dispatch(
-        "resizewindowpixel",
-        format!("exact {} {},{}", width, height, address),
+        if attempt == 0 {
+            eprintln!("retrying tiling window 0x{:x}", wid);
+        }
+    }
+
+    eprintln!(
+        "failed to tile window 0x{:x} to {},{} {}x{}",
+        wid, x, y, width, height
     );
-    hypr_dispatch(
-        "movewindowpixel",
-        format!("exact {} {},{}", x, y, address),
-    );
-    hypr_dispatch("alterzorder", format!("top,{}", address));
+}
+
+fn geometry_matches(actual: (i32, i32, i32, i32), expected: (i32, i32, i32, i32)) -> bool {
+    let tolerance = 10;
+    (actual.0 - expected.0).abs() <= tolerance
+        && (actual.1 - expected.1).abs() <= tolerance
+        && (actual.2 - expected.2).abs() <= tolerance
+        && (actual.3 - expected.3).abs() <= tolerance
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

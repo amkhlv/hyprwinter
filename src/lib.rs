@@ -156,7 +156,16 @@ fn lua_dispatcher_expr(dispatcher: &str, argument: &str) -> Option<String> {
             "hl.dsp.focus({{ window = {} }})",
             lua_string(argument)
         )),
-        "setfloating" => Some("hl.dsp.window.float({ action = \"set\" })".to_string()),
+        "setfloating" => {
+            if argument.is_empty() {
+                Some("hl.dsp.window.float({ action = \"set\" })".to_string())
+            } else {
+                Some(format!(
+                    "hl.dsp.window.float({{ action = \"set\", window = {} }})",
+                    lua_string(argument)
+                ))
+            }
+        }
         "alterzorder" => {
             let mut args = argument.splitn(2, ',');
             let mode = args.next()?.trim();
@@ -264,6 +273,54 @@ pub fn hypr_lua_dispatch(lua_expr: &str) -> bool {
             false
         }
     }
+}
+
+pub fn window_is_floating(win: Window) -> Option<bool> {
+    let clients = run_hyprctl_json(&["-j", "clients"])?;
+    clients
+        .as_array()?
+        .iter()
+        .find(|client| json_to_window_address(&client["address"]) == Some(win))
+        .and_then(|client| client["floating"].as_bool())
+}
+
+pub fn window_geometry(win: Window) -> Option<(i32, i32, i32, i32)> {
+    let clients = run_hyprctl_json(&["-j", "clients"])?;
+    let client = clients
+        .as_array()?
+        .iter()
+        .find(|client| json_to_window_address(&client["address"]) == Some(win))?;
+    let at = client["at"].as_array()?;
+    let size = client["size"].as_array()?;
+    Some((
+        at.get(0)?.as_i64()? as i32,
+        at.get(1)?.as_i64()? as i32,
+        size.get(0)?.as_i64()? as i32,
+        size.get(1)?.as_i64()? as i32,
+    ))
+}
+
+pub fn hypr_tile_window(win: Window, x: i32, y: i32, width: i32, height: i32) -> bool {
+    let selector = format!("address:0x{:x}", win);
+    let selector = lua_string(&selector);
+    let lua_expr = format!(
+        concat!(
+            "function() ",
+            "hl.dispatch(hl.dsp.focus({{ window = {selector} }})); ",
+            "hl.dispatch(hl.dsp.window.float({{ action = \"set\" }})); ",
+            "hl.dispatch(hl.dsp.window.resize({{ x = {width}, y = {height}, window = {selector} }})); ",
+            "hl.dispatch(hl.dsp.window.move({{ x = {x}, y = {y}, window = {selector} }})); ",
+            "hl.dispatch(hl.dsp.window.alter_zorder({{ mode = \"top\", window = {selector} }})); ",
+            "end"
+        ),
+        selector = selector,
+        x = x,
+        y = y,
+        width = width,
+        height = height,
+    );
+
+    hypr_lua_dispatch(&lua_expr)
 }
 
 pub fn get_wm_data() -> (
